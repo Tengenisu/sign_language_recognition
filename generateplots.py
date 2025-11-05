@@ -3,7 +3,8 @@ generate_plots.py - Comprehensive Evaluation and Visualization
 
 Generates all plots and analysis for a trained model:
 - Confusion matrix
-- Per-class accuracy analysis
+- Per-class metrics (accuracy, precision, recall, F1)
+- Macro/Micro/Weighted averages
 - Top-K accuracy curves
 - Error analysis
 - Confidence distribution
@@ -197,40 +198,67 @@ def plot_confusion_matrix(results, output_dir, config):
 
 
 def plot_per_class_accuracy(results, output_dir, config, num_classes=226):
-    """Plot per-class accuracy analysis"""
+    """Plot per-class accuracy analysis with precision, recall, F1"""
     labels = results['labels']
     preds = results['predictions']
     
-    print(f"\n📊 Analyzing per-class accuracy...")
+    print(f"\n📊 Analyzing per-class metrics (accuracy, precision, recall, F1)...")
     
     # Compute per-class metrics
     per_class_stats = []
     
     for c in range(num_classes):
-        mask = labels == c
-        num_samples = mask.sum()
+        # True Positives, False Positives, False Negatives
+        tp = ((preds == c) & (labels == c)).sum()
+        fp = ((preds == c) & (labels != c)).sum()
+        fn = ((preds != c) & (labels == c)).sum()
         
+        num_samples = (labels == c).sum()
+        
+        # Accuracy
         if num_samples > 0:
-            correct = (preds[mask] == c).sum()
-            accuracy = correct / num_samples * 100
+            accuracy = tp / num_samples * 100
         else:
             accuracy = 0.0
-            num_samples = 0
+        
+        # Precision
+        if tp + fp > 0:
+            precision = tp / (tp + fp) * 100
+        else:
+            precision = 0.0
+        
+        # Recall
+        if tp + fn > 0:
+            recall = tp / (tp + fn) * 100
+        else:
+            recall = 0.0
+        
+        # F1 Score
+        if precision + recall > 0:
+            f1 = 2 * (precision * recall) / (precision + recall)
+        else:
+            f1 = 0.0
         
         per_class_stats.append({
             'class': c,
             'accuracy': accuracy,
-            'num_samples': num_samples
+            'precision': precision,
+            'recall': recall,
+            'f1_score': f1,
+            'num_samples': num_samples,
+            'tp': tp,
+            'fp': fp,
+            'fn': fn
         })
     
     df = pd.DataFrame(per_class_stats)
-    df.to_csv(output_dir / 'per_class_accuracy.csv', index=False)
+    df.to_csv(output_dir / 'per_class_metrics.csv', index=False)
     
     # Filter classes with at least 5 samples
     df_filtered = df[df['num_samples'] >= 5].copy()
     
-    # Plot
-    fig, axes = plt.subplots(2, 2, figsize=config['figsize_large'])
+    # Plot - now with 3x2 grid for more metrics
+    fig, axes = plt.subplots(3, 2, figsize=(16, 18))
     
     # 1. Accuracy distribution
     axes[0, 0].hist(df_filtered['accuracy'], bins=50, color='steelblue', edgecolor='black')
@@ -242,47 +270,72 @@ def plot_per_class_accuracy(results, output_dir, config, num_classes=226):
     axes[0, 0].legend()
     axes[0, 0].grid(True, alpha=0.3)
     
-    # 2. Accuracy vs Number of Samples
-    axes[0, 1].scatter(df_filtered['num_samples'], df_filtered['accuracy'], 
-                       alpha=0.5, s=30, c='steelblue')
-    axes[0, 1].set_xlabel('Number of Samples', fontsize=12)
-    axes[0, 1].set_ylabel('Accuracy (%)', fontsize=12)
-    axes[0, 1].set_title('Accuracy vs Sample Size', fontsize=14, fontweight='bold')
+    # 2. Precision distribution
+    axes[0, 1].hist(df_filtered['precision'], bins=50, color='green', edgecolor='black')
+    axes[0, 1].axvline(df_filtered['precision'].mean(), color='red', 
+                       linestyle='--', linewidth=2, label=f'Mean: {df_filtered["precision"].mean():.1f}%')
+    axes[0, 1].set_xlabel('Precision (%)', fontsize=12)
+    axes[0, 1].set_ylabel('Number of Classes', fontsize=12)
+    axes[0, 1].set_title('Per-Class Precision Distribution', fontsize=14, fontweight='bold')
+    axes[0, 1].legend()
     axes[0, 1].grid(True, alpha=0.3)
     
-    # 3. Top 10 best classes
-    top10 = df_filtered.nlargest(10, 'accuracy')
-    axes[1, 0].barh(range(10), top10['accuracy'].values, color='green', alpha=0.7)
-    axes[1, 0].set_yticks(range(10))
-    axes[1, 0].set_yticklabels([f"Class {int(c)}" for c in top10['class'].values])
-    axes[1, 0].set_xlabel('Accuracy (%)', fontsize=12)
-    axes[1, 0].set_title('Top 10 Best Performing Classes', fontsize=14, fontweight='bold')
-    axes[1, 0].grid(True, alpha=0.3, axis='x')
-    axes[1, 0].invert_yaxis()
+    # 3. Recall distribution
+    axes[1, 0].hist(df_filtered['recall'], bins=50, color='orange', edgecolor='black')
+    axes[1, 0].axvline(df_filtered['recall'].mean(), color='red', 
+                       linestyle='--', linewidth=2, label=f'Mean: {df_filtered["recall"].mean():.1f}%')
+    axes[1, 0].set_xlabel('Recall (%)', fontsize=12)
+    axes[1, 0].set_ylabel('Number of Classes', fontsize=12)
+    axes[1, 0].set_title('Per-Class Recall Distribution', fontsize=14, fontweight='bold')
+    axes[1, 0].legend()
+    axes[1, 0].grid(True, alpha=0.3)
     
-    # 4. Bottom 10 worst classes
-    bottom10 = df_filtered.nsmallest(10, 'accuracy')
-    axes[1, 1].barh(range(10), bottom10['accuracy'].values, color='red', alpha=0.7)
-    axes[1, 1].set_yticks(range(10))
-    axes[1, 1].set_yticklabels([f"Class {int(c)}" for c in bottom10['class'].values])
-    axes[1, 1].set_xlabel('Accuracy (%)', fontsize=12)
-    axes[1, 1].set_title('Top 10 Worst Performing Classes', fontsize=14, fontweight='bold')
-    axes[1, 1].grid(True, alpha=0.3, axis='x')
-    axes[1, 1].invert_yaxis()
+    # 4. F1-Score distribution
+    axes[1, 1].hist(df_filtered['f1_score'], bins=50, color='purple', edgecolor='black')
+    axes[1, 1].axvline(df_filtered['f1_score'].mean(), color='red', 
+                       linestyle='--', linewidth=2, label=f'Mean: {df_filtered["f1_score"].mean():.1f}%')
+    axes[1, 1].set_xlabel('F1-Score (%)', fontsize=12)
+    axes[1, 1].set_ylabel('Number of Classes', fontsize=12)
+    axes[1, 1].set_title('Per-Class F1-Score Distribution', fontsize=14, fontweight='bold')
+    axes[1, 1].legend()
+    axes[1, 1].grid(True, alpha=0.3)
+    
+    # 5. Precision vs Recall scatter
+    axes[2, 0].scatter(df_filtered['recall'], df_filtered['precision'], 
+                       alpha=0.5, s=30, c='steelblue')
+    axes[2, 0].plot([0, 100], [0, 100], 'r--', alpha=0.3, label='Perfect')
+    axes[2, 0].set_xlabel('Recall (%)', fontsize=12)
+    axes[2, 0].set_ylabel('Precision (%)', fontsize=12)
+    axes[2, 0].set_title('Precision vs Recall', fontsize=14, fontweight='bold')
+    axes[2, 0].legend()
+    axes[2, 0].grid(True, alpha=0.3)
+    axes[2, 0].set_xlim([0, 105])
+    axes[2, 0].set_ylim([0, 105])
+    
+    # 6. Metrics vs Sample Size
+    axes[2, 1].scatter(df_filtered['num_samples'], df_filtered['f1_score'], 
+                       alpha=0.5, s=30, c='purple', label='F1-Score')
+    axes[2, 1].scatter(df_filtered['num_samples'], df_filtered['accuracy'], 
+                       alpha=0.5, s=30, c='steelblue', label='Accuracy')
+    axes[2, 1].set_xlabel('Number of Samples', fontsize=12)
+    axes[2, 1].set_ylabel('Score (%)', fontsize=12)
+    axes[2, 1].set_title('Metrics vs Sample Size', fontsize=14, fontweight='bold')
+    axes[2, 1].legend()
+    axes[2, 1].grid(True, alpha=0.3)
     
     plt.tight_layout()
     plt.savefig(output_dir / 'per_class_analysis.png', dpi=config['dpi'], bbox_inches='tight')
     plt.close()
     
     print(f"   ✓ Saved: per_class_analysis.png")
-    print(f"   ✓ Saved: per_class_accuracy.csv")
+    print(f"   ✓ Saved: per_class_metrics.csv")
     
     # Print summary
     print(f"\n   Summary:")
-    print(f"     Mean accuracy: {df_filtered['accuracy'].mean():.2f}%")
-    print(f"     Std accuracy: {df_filtered['accuracy'].std():.2f}%")
-    print(f"     Min accuracy: {df_filtered['accuracy'].min():.2f}%")
-    print(f"     Max accuracy: {df_filtered['accuracy'].max():.2f}%")
+    print(f"     Mean accuracy:  {df_filtered['accuracy'].mean():.2f}%")
+    print(f"     Mean precision: {df_filtered['precision'].mean():.2f}%")
+    print(f"     Mean recall:    {df_filtered['recall'].mean():.2f}%")
+    print(f"     Mean F1-score:  {df_filtered['f1_score'].mean():.2f}%")
 
 
 def plot_confidence_analysis(results, output_dir, config):
@@ -490,9 +543,255 @@ def plot_error_analysis(results, output_dir, config):
     print(f"   ✓ Saved: common_errors.csv")
 
 
+def compute_macro_micro_metrics(results):
+    """Compute macro and micro averaged metrics"""
+    labels = results['labels']
+    preds = results['predictions']
+    num_classes = results['probabilities'].shape[1]
+    
+    # Per-class TP, FP, FN
+    tp_per_class = np.zeros(num_classes)
+    fp_per_class = np.zeros(num_classes)
+    fn_per_class = np.zeros(num_classes)
+    
+    for c in range(num_classes):
+        tp_per_class[c] = ((preds == c) & (labels == c)).sum()
+        fp_per_class[c] = ((preds == c) & (labels != c)).sum()
+        fn_per_class[c] = ((preds != c) & (labels == c)).sum()
+    
+    # Micro-averaged metrics (aggregate over all classes)
+    tp_total = tp_per_class.sum()
+    fp_total = fp_per_class.sum()
+    fn_total = fn_per_class.sum()
+    
+    micro_precision = tp_total / (tp_total + fp_total) if (tp_total + fp_total) > 0 else 0
+    micro_recall = tp_total / (tp_total + fn_total) if (tp_total + fn_total) > 0 else 0
+    micro_f1 = 2 * micro_precision * micro_recall / (micro_precision + micro_recall) if (micro_precision + micro_recall) > 0 else 0
+    
+    # Macro-averaged metrics (average of per-class metrics)
+    precision_per_class = np.zeros(num_classes)
+    recall_per_class = np.zeros(num_classes)
+    f1_per_class = np.zeros(num_classes)
+    
+    for c in range(num_classes):
+        if tp_per_class[c] + fp_per_class[c] > 0:
+            precision_per_class[c] = tp_per_class[c] / (tp_per_class[c] + fp_per_class[c])
+        if tp_per_class[c] + fn_per_class[c] > 0:
+            recall_per_class[c] = tp_per_class[c] / (tp_per_class[c] + fn_per_class[c])
+        if precision_per_class[c] + recall_per_class[c] > 0:
+            f1_per_class[c] = 2 * precision_per_class[c] * recall_per_class[c] / (precision_per_class[c] + recall_per_class[c])
+    
+    macro_precision = precision_per_class.mean()
+    macro_recall = recall_per_class.mean()
+    macro_f1 = f1_per_class.mean()
+    
+    # Weighted averages (weighted by class frequency)
+    class_counts = np.array([(labels == c).sum() for c in range(num_classes)])
+    total_samples = class_counts.sum()
+    
+    weighted_precision = (precision_per_class * class_counts).sum() / total_samples if total_samples > 0 else 0
+    weighted_recall = (recall_per_class * class_counts).sum() / total_samples if total_samples > 0 else 0
+    weighted_f1 = (f1_per_class * class_counts).sum() / total_samples if total_samples > 0 else 0
+    
+    return {
+        'micro_precision': micro_precision * 100,
+        'micro_recall': micro_recall * 100,
+        'micro_f1': micro_f1 * 100,
+        'macro_precision': macro_precision * 100,
+        'macro_recall': macro_recall * 100,
+        'macro_f1': macro_f1 * 100,
+        'weighted_precision': weighted_precision * 100,
+        'weighted_recall': weighted_recall * 100,
+        'weighted_f1': weighted_f1 * 100,
+    }
+
+
+def plot_precision_recall_f1_summary(results, output_dir, config, num_classes=226):
+    """Plot detailed precision, recall, F1 summary with best/worst classes"""
+    print(f"\n📊 Generating precision/recall/F1 detailed plots...")
+    
+    labels = results['labels']
+    preds = results['predictions']
+    
+    # Compute per-class metrics
+    per_class_stats = []
+    
+    for c in range(num_classes):
+        tp = ((preds == c) & (labels == c)).sum()
+        fp = ((preds == c) & (labels != c)).sum()
+        fn = ((preds != c) & (labels == c)).sum()
+        num_samples = (labels == c).sum()
+        
+        if num_samples > 0:
+            accuracy = tp / num_samples * 100
+        else:
+            accuracy = 0.0
+        
+        if tp + fp > 0:
+            precision = tp / (tp + fp) * 100
+        else:
+            precision = 0.0
+        
+        if tp + fn > 0:
+            recall = tp / (tp + fn) * 100
+        else:
+            recall = 0.0
+        
+        if precision + recall > 0:
+            f1 = 2 * (precision * recall) / (precision + recall)
+        else:
+            f1 = 0.0
+        
+        per_class_stats.append({
+            'class': c,
+            'precision': precision,
+            'recall': recall,
+            'f1_score': f1,
+            'num_samples': num_samples
+        })
+    
+    df = pd.DataFrame(per_class_stats)
+    df_filtered = df[df['num_samples'] >= 5].copy()
+    
+    # Create 2x2 figure for best/worst analysis
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # 1. Top 15 Precision
+    top_precision = df_filtered.nlargest(15, 'precision')
+    axes[0, 0].barh(range(15), top_precision['precision'].values, color='green', alpha=0.7)
+    axes[0, 0].set_yticks(range(15))
+    axes[0, 0].set_yticklabels([f"Class {int(c)}" for c in top_precision['class'].values])
+    axes[0, 0].set_xlabel('Precision (%)', fontsize=12)
+    axes[0, 0].set_title('Top 15 Classes by Precision', fontsize=14, fontweight='bold')
+    axes[0, 0].grid(True, alpha=0.3, axis='x')
+    axes[0, 0].invert_yaxis()
+    axes[0, 0].set_xlim([0, 105])
+    
+    # 2. Top 15 Recall
+    top_recall = df_filtered.nlargest(15, 'recall')
+    axes[0, 1].barh(range(15), top_recall['recall'].values, color='orange', alpha=0.7)
+    axes[0, 1].set_yticks(range(15))
+    axes[0, 1].set_yticklabels([f"Class {int(c)}" for c in top_recall['class'].values])
+    axes[0, 1].set_xlabel('Recall (%)', fontsize=12)
+    axes[0, 1].set_title('Top 15 Classes by Recall', fontsize=14, fontweight='bold')
+    axes[0, 1].grid(True, alpha=0.3, axis='x')
+    axes[0, 1].invert_yaxis()
+    axes[0, 1].set_xlim([0, 105])
+    
+    # 3. Top 15 F1-Score
+    top_f1 = df_filtered.nlargest(15, 'f1_score')
+    axes[1, 0].barh(range(15), top_f1['f1_score'].values, color='purple', alpha=0.7)
+    axes[1, 0].set_yticks(range(15))
+    axes[1, 0].set_yticklabels([f"Class {int(c)}" for c in top_f1['class'].values])
+    axes[1, 0].set_xlabel('F1-Score (%)', fontsize=12)
+    axes[1, 0].set_title('Top 15 Classes by F1-Score', fontsize=14, fontweight='bold')
+    axes[1, 0].grid(True, alpha=0.3, axis='x')
+    axes[1, 0].invert_yaxis()
+    axes[1, 0].set_xlim([0, 105])
+    
+    # 4. Bottom 15 F1-Score (worst performing)
+    bottom_f1 = df_filtered.nsmallest(15, 'f1_score')
+    axes[1, 1].barh(range(15), bottom_f1['f1_score'].values, color='red', alpha=0.7)
+    axes[1, 1].set_yticks(range(15))
+    axes[1, 1].set_yticklabels([f"Class {int(c)}" for c in bottom_f1['class'].values])
+    axes[1, 1].set_xlabel('F1-Score (%)', fontsize=12)
+    axes[1, 1].set_title('Bottom 15 Classes by F1-Score', fontsize=14, fontweight='bold')
+    axes[1, 1].grid(True, alpha=0.3, axis='x')
+    axes[1, 1].invert_yaxis()
+    axes[1, 1].set_xlim([0, 105])
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'precision_recall_f1_rankings.png', dpi=config['dpi'], bbox_inches='tight')
+    plt.close()
+    
+    print(f"   ✓ Saved: precision_recall_f1_rankings.png")
+
+
+def plot_macro_micro_comparison(results, output_dir, config):
+    """Plot comparison of macro, micro, and weighted metrics"""
+    print(f"\n📊 Computing macro/micro/weighted averages...")
+    
+    metrics = compute_macro_micro_metrics(results)
+    
+    # Save to CSV
+    metrics_df = pd.DataFrame([metrics])
+    metrics_df.to_csv(output_dir / 'aggregate_metrics.csv', index=False)
+    
+    # Create visualization
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    
+    # 1. Bar chart comparing metrics
+    metric_types = ['Micro', 'Macro', 'Weighted']
+    precision_vals = [metrics['micro_precision'], metrics['macro_precision'], metrics['weighted_precision']]
+    recall_vals = [metrics['micro_recall'], metrics['macro_recall'], metrics['weighted_recall']]
+    f1_vals = [metrics['micro_f1'], metrics['macro_f1'], metrics['weighted_f1']]
+    
+    x = np.arange(len(metric_types))
+    width = 0.25
+    
+    axes[0].bar(x - width, precision_vals, width, label='Precision', color='green', alpha=0.8)
+    axes[0].bar(x, recall_vals, width, label='Recall', color='orange', alpha=0.8)
+    axes[0].bar(x + width, f1_vals, width, label='F1-Score', color='purple', alpha=0.8)
+    
+    axes[0].set_xlabel('Averaging Method', fontsize=12)
+    axes[0].set_ylabel('Score (%)', fontsize=12)
+    axes[0].set_title('Aggregate Metrics Comparison', fontsize=14, fontweight='bold')
+    axes[0].set_xticks(x)
+    axes[0].set_xticklabels(metric_types)
+    axes[0].legend()
+    axes[0].grid(True, alpha=0.3, axis='y')
+    axes[0].set_ylim([0, 100])
+    
+    # 2. Text summary
+    axes[1].axis('off')
+    summary_text = f"""
+    Aggregate Metrics Summary
+    {'='*50}
+    
+    MICRO-AVERAGED (Overall):
+      Precision: {metrics['micro_precision']:.2f}%
+      Recall:    {metrics['micro_recall']:.2f}%
+      F1-Score:  {metrics['micro_f1']:.2f}%
+    
+    MACRO-AVERAGED (Per-Class):
+      Precision: {metrics['macro_precision']:.2f}%
+      Recall:    {metrics['macro_recall']:.2f}%
+      F1-Score:  {metrics['macro_f1']:.2f}%
+    
+    WEIGHTED-AVERAGED (By Frequency):
+      Precision: {metrics['weighted_precision']:.2f}%
+      Recall:    {metrics['weighted_recall']:.2f}%
+      F1-Score:  {metrics['weighted_f1']:.2f}%
+    
+    {'='*50}
+    Note:
+    - Micro: Aggregate over all instances
+    - Macro: Simple average of per-class metrics
+    - Weighted: Average weighted by class frequency
+    """
+    axes[1].text(0.1, 0.5, summary_text, fontsize=11, family='monospace',
+                verticalalignment='center')
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'aggregate_metrics.png', dpi=config['dpi'], bbox_inches='tight')
+    plt.close()
+    
+    print(f"   ✓ Saved: aggregate_metrics.png")
+    print(f"   ✓ Saved: aggregate_metrics.csv")
+    
+    # Print summary
+    print(f"\n   Summary:")
+    print(f"     Micro F1:    {metrics['micro_f1']:.2f}%")
+    print(f"     Macro F1:    {metrics['macro_f1']:.2f}%")
+    print(f"     Weighted F1: {metrics['weighted_f1']:.2f}%")
+
+
 def generate_summary_report(results, output_dir, model_config):
     """Generate a comprehensive text report"""
     print(f"\n📄 Generating summary report...")
+    
+    # Compute aggregate metrics
+    agg_metrics = compute_macro_micro_metrics(results)
     
     report_path = output_dir / 'evaluation_report.txt'
     
@@ -519,6 +818,25 @@ def generate_summary_report(results, output_dir, model_config):
         f.write(f"Total samples: {len(results['labels'])}\n")
         f.write(f"Correct predictions: {results['correct'].sum()}\n")
         f.write(f"Incorrect predictions: {(~results['correct']).sum()}\n")
+        f.write("\n")
+        
+        # Aggregate metrics
+        f.write("AGGREGATE METRICS\n")
+        f.write("-"*80 + "\n")
+        f.write("Micro-Averaged (Overall):\n")
+        f.write(f"  Precision: {agg_metrics['micro_precision']:.2f}%\n")
+        f.write(f"  Recall:    {agg_metrics['micro_recall']:.2f}%\n")
+        f.write(f"  F1-Score:  {agg_metrics['micro_f1']:.2f}%\n")
+        f.write("\n")
+        f.write("Macro-Averaged (Per-Class):\n")
+        f.write(f"  Precision: {agg_metrics['macro_precision']:.2f}%\n")
+        f.write(f"  Recall:    {agg_metrics['macro_recall']:.2f}%\n")
+        f.write(f"  F1-Score:  {agg_metrics['macro_f1']:.2f}%\n")
+        f.write("\n")
+        f.write("Weighted-Averaged (By Frequency):\n")
+        f.write(f"  Precision: {agg_metrics['weighted_precision']:.2f}%\n")
+        f.write(f"  Recall:    {agg_metrics['weighted_recall']:.2f}%\n")
+        f.write(f"  F1-Score:  {agg_metrics['weighted_f1']:.2f}%\n")
         f.write("\n")
         
         # Confidence stats
@@ -643,9 +961,11 @@ def main():
     
     plot_confusion_matrix(results, output_dir, config)
     plot_per_class_accuracy(results, output_dir, config, model_config.get('num_classes', 226))
+    plot_precision_recall_f1_summary(results, output_dir, config, model_config.get('num_classes', 226))
     plot_confidence_analysis(results, output_dir, config)
     plot_topk_accuracy(results, output_dir, config)
     plot_error_analysis(results, output_dir, config)
+    plot_macro_micro_comparison(results, output_dir, config)
     generate_summary_report(results, output_dir, model_config)
     
     print("\n" + "="*80)
@@ -655,11 +975,14 @@ def main():
     print("\nGenerated files:")
     print("  - confusion_matrix.png")
     print("  - per_class_analysis.png")
-    print("  - per_class_accuracy.csv")
+    print("  - per_class_metrics.csv")
+    print("  - precision_recall_f1_rankings.png")
     print("  - confidence_analysis.png")
     print("  - topk_accuracy.png")
     print("  - common_errors.png")
     print("  - common_errors.csv")
+    print("  - aggregate_metrics.png")
+    print("  - aggregate_metrics.csv")
     print("  - evaluation_report.txt")
     print("\n" + "="*80)
 
