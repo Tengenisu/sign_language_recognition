@@ -382,9 +382,9 @@ If you use this code in your research, please cite:
 ```bibtex
 @misc{corrformer-lite-slt,
   title={CorrFormer-Lite: Lightweight Sign Language Recognition with Correlation-based Transformers},
-  author={Your Name},
-  year={2024},
-  howpublished={\url{https://github.com/yourusername/sign-language-recognition}}
+  author={Aryan Vohra},
+  year={2025},
+  howpublished={\url{https://github.com/Tengenisu/sign_language_recognition/}}
 }
 ```
 
