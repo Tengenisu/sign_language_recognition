@@ -28,7 +28,7 @@ from model import create_model
 
 CONFIG = {
     'checkpoint_path': None,  # Will auto-detect if None
-    'data_root': 'processed',  # Where normalization_stats.json is
+    'data_root': 'processed_autsl',  # Where normalization_stats.json is
     'device': 'cuda',  # 'cuda' or 'cpu'
     'top_k': 5,  # Show top-k predictions
 }
@@ -345,7 +345,8 @@ def preprocess_video(video_path, preprocess_settings, mean=None, std=None):
         print("   Applied dataset-level normalization")
     
     sequences = torch.from_numpy(sequence).unsqueeze(0)  # [1, T, J, 3]
-    joint_types = get_joint_type_tensor(sequence.shape[1]).unsqueeze(0)  # [1, J]
+    # FIXED: Use NUM_JOINTS (56) instead of sequence.shape[1] which is num_frames
+    joint_types = get_joint_type_tensor(NUM_JOINTS).unsqueeze(0)  # [1, J]
     
     return sequences.float(), joint_types
 
@@ -356,7 +357,7 @@ def predict(model, sequences, joint_types, device='cuda', top_k=5):
     
     Args:
         model: Trained model
-        sequences: Input sequences [1, T, J, 2]
+        sequences: Input sequences [1, T, J, 3] (x, y, confidence)
         joint_types: Joint type indices [1, J]
         device: Device to run on
         top_k: Number of top predictions to return
@@ -415,7 +416,7 @@ def main():
                         help='Path to input video file')
     parser.add_argument('--checkpoint', type=str, default=None,
                         help='Path to model checkpoint (auto-detects if not provided)')
-    parser.add_argument('--data_root', type=str, default='processed',
+    parser.add_argument('--data_root', type=str, default='processed_autsl',
                         help='Path to processed data directory')
     parser.add_argument('--device', type=str, default='cuda',
                         help='Device to use (cuda/cpu)')
