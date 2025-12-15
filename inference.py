@@ -14,7 +14,7 @@ import json
 import argparse
 from pathlib import Path
 import sys
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 import cv2
 import mediapipe as mp
@@ -41,9 +41,10 @@ DEFAULT_PREPROCESS_SETTINGS = {
     'min_tracking_confidence': 0.3,
 }
 
-POSE_LANDMARKS = list(range(11, 25))  # Upper body landmarks used during preprocessing
+# CRITICAL FIX: Match the exact pose landmarks used in preprocessing.py
+POSE_LANDMARKS = [0, 11, 12, 13, 14, 15, 16, 23, 24, 7, 8, 9, 10, 1]  # 14 landmarks
 NUM_HAND_LANDMARKS = 21  # MediaPipe hand landmarks per side
-NUM_JOINTS = len(POSE_LANDMARKS) + 2 * NUM_HAND_LANDMARKS
+NUM_JOINTS = len(POSE_LANDMARKS) + 2 * NUM_HAND_LANDMARKS  # 14 + 21 + 21 = 56
 
 JOINT_TYPE_TEMPLATE = torch.tensor(
     [0] * len(POSE_LANDMARKS) +
@@ -130,6 +131,7 @@ def extract_keypoints_from_results(results) -> np.ndarray:
     """Convert MediaPipe holistic results into a (J, 3) array."""
     keypoints = []
 
+    # Extract pose landmarks in the correct order
     if results.pose_landmarks:
         for idx in POSE_LANDMARKS:
             lm = results.pose_landmarks.landmark[idx]
@@ -137,12 +139,14 @@ def extract_keypoints_from_results(results) -> np.ndarray:
     else:
         keypoints.extend([[0.0, 0.0, 0.0]] * len(POSE_LANDMARKS))
 
+    # Left hand
     if results.left_hand_landmarks:
         for lm in results.left_hand_landmarks.landmark:
             keypoints.append([lm.x, lm.y, lm.z])
     else:
         keypoints.extend([[0.0, 0.0, 0.0]] * NUM_HAND_LANDMARKS)
 
+    # Right hand
     if results.right_hand_landmarks:
         for lm in results.right_hand_landmarks.landmark:
             keypoints.append([lm.x, lm.y, lm.z])
@@ -187,7 +191,7 @@ def pad_or_truncate(sequence: np.ndarray, target_length: Optional[int]) -> np.nd
     return np.concatenate([sequence, padding], axis=0)
 
 
-def extract_keypoints_from_video(video_path: Path, settings: Dict[str, float]) -> tuple[np.ndarray, int]:
+def extract_keypoints_from_video(video_path: Path, settings: Dict[str, float]) -> Tuple[np.ndarray, int]:
     """Extract normalized keypoint sequence from a video."""
     frames = sample_video_frames(video_path, settings.get('max_frames'))
 
@@ -338,14 +342,18 @@ def preprocess_video(video_path, preprocess_settings, mean=None, std=None):
     print(f"\n🎥 Processing video: {video_path}")
     
     sequence, original_length = extract_keypoints_from_video(Path(video_path), preprocess_settings)
-    print(f"   Extracted {original_length} frames → processed sequence {sequence.shape}")
+    print(f"   Extracted {original_length} frames → processed sequence shape: {sequence.shape}")
+    
+    # Verify sequence has correct number of joints
+    if sequence.shape[1] != NUM_JOINTS:
+        raise ValueError(f"Expected {NUM_JOINTS} joints but got {sequence.shape[1]}. "
+                        f"Check POSE_LANDMARKS configuration.")
     
     if mean is not None and std is not None:
         sequence = normalize_keypoints(sequence, mean, std)
         print("   Applied dataset-level normalization")
     
     sequences = torch.from_numpy(sequence).unsqueeze(0)  # [1, T, J, 3]
-    # FIXED: Use NUM_JOINTS (56) instead of sequence.shape[1] which is num_frames
     joint_types = get_joint_type_tensor(NUM_JOINTS).unsqueeze(0)  # [1, J]
     
     return sequences.float(), joint_types
@@ -471,6 +479,8 @@ def main():
         sequences, joint_types = preprocess_video(video_path, preprocess_settings, mean, std)
     except Exception as e:
         print(f"❌ Error preprocessing video: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
     
     # Make prediction

@@ -72,8 +72,8 @@ def get_input_shape(data_root):
             # seq shape: (B, T, J, features_per_joint)
             return seq.shape[1:4]  # (T, J, features_per_joint)
     except:
-        # Default fallback: 64 frames, 181 joints, 3 features (x,y,z)
-        return (64, 181, 3)
+        # Default fallback: 64 frames, 56 joints, 3 features (x,y,z)
+        return (64, 56, 3)
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters()) / 1e6
